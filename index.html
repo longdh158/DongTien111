@@ -70,12 +70,14 @@ const LAYOUT = {
   /* Overview để gọn. Khối có sẵn dùng được:
      'balance' 'hero' 'groupsLite' 'groups' 'debtLine' 'recon' 'debtPaid' 'pending'
      Thêm tên vào mảng là hiện, bỏ ra là ẩn, đổi thứ tự là đổi vị trí. */
-  overview: ['balance','hero','groupsLite','offset','debtLine','pending'],
+  /* Khối có sẵn: 'balance' 'hero' 'groupsLite' 'groups' 'drift'
+     'offset' 'debtLine' 'recon' 'debtPaid' 'pending' */
+  overview: ['hero','groupsLite','drift','offset','debtLine','pending'],
   debt:     ['card','installment','loan'],
-  month:    ['balances','incomes','accounts'],
+  month:    ['incomes'],
 };
 
-const BUILD = 'b24';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b27';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -205,13 +207,14 @@ function load(){
     keepPairs: saved.keepPairs || false,
     bal: saved.bal || null,
     pairSeen: saved.pairSeen || {},
+    drift: saved.drift || null,
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month, drift:state.drift,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -414,11 +417,11 @@ body{font-family:${THEME.font.family};color:${C.text};font-weight:300;line-heigh
   .phone{max-width:${THEME.maxWidth}px;height:calc(100% - ${S.md*2}px);border:1px solid ${C.line};
     border-radius:${R.phone}px;box-shadow:0 30px 70px rgba(0,0,0,.45)}
 }
-header{flex:none;padding:calc(${S.sm}px + env(safe-area-inset-top)) ${S.lg}px ${S.sm+2}px;
+header{flex:none;min-width:0;padding:calc(${S.sm}px + env(safe-area-inset-top)) ${S.lg}px ${S.sm+2}px;
   display:flex;align-items:center;justify-content:space-between;gap:${S.sm}px;
   border-bottom:1px solid ${C.line}}
 .hd-right{text-align:right;line-height:1.35;flex:none}
-.brand{font-size:15px;font-weight:600;letter-spacing:.02em}
+.brand{font-size:15px;font-weight:600;letter-spacing:.02em;min-width:0;overflow:hidden}
 .brand span{color:${C.accent}}
 .hd-right{font-size:12px;color:${C.muted}}
 main{flex:1;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;
@@ -430,19 +433,19 @@ main::-webkit-scrollbar{width:0}
 .hero i{font-style:normal;font-size:18px;color:${C.muted};font-weight:300;margin-left:2px}
 .split{display:flex;margin-top:${S.md+2}px;border:1px solid ${C.line};
   border-radius:${R.md}px;overflow:hidden}
-.split>div{flex:1;padding:${S.sm+3}px ${S.md-2}px}
+.split>div{flex:1;min-width:0;padding:${S.sm+3}px ${S.md-2}px}
 .split>div+div{border-left:1px solid ${C.line}}
 .split h4{font-size:${THEME.font.labelSize}px;color:${C.faint};font-weight:400;margin-bottom:${S.xs}px}
 .split .v{font-size:15px}
 .split .v i{font-style:normal;font-size:11px;color:${C.muted}}
 .bars{margin:${S.lg}px 0 0}
 .bar{margin-bottom:${S.md-1}px}
-.bar .top{display:flex;justify-content:space-between;align-items:baseline;gap:${S.sm}px;
+.bar .top{display:flex;min-width:0;justify-content:space-between;align-items:baseline;gap:${S.sm}px;
   margin-bottom:${S.xs}px;cursor:pointer}
-.bar .nm{font-size:${THEME.font.bodySize}px;display:flex;align-items:center;gap:${S.xs}px}
+.bar .nm{font-size:${THEME.font.bodySize}px;display:flex;align-items:center;gap:${S.xs}px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar .nm em{font-style:normal;color:${C.faint};font-size:10px;transition:transform .22s;display:inline-block}
 .bar.open .nm em{transform:rotate(90deg);color:${C.accent}}
-.bar .rt{font-size:${THEME.font.bodySize}px;color:${C.muted};white-space:nowrap}
+.bar .rt{font-size:${THEME.font.bodySize}px;color:${C.muted};white-space:nowrap;flex:none}
 .bar .rt b{color:${C.text};font-weight:400}
 .bar .dlt{font-size:11px;margin-left:7px;color:${C.faint}}
 .track{height:4px;background:${C.surface2};border-radius:2px;overflow:hidden}
@@ -644,8 +647,8 @@ function parseShot(text, capture, force){
 /* ---------- các khối ---------- */
 const blocks = {
   hero(s){ return `
-    <p class="eyebrow" style="margin-top:${S.lg}px">Đã sử dụng · tháng 9</p>
-    <div class="hero num" style="font-size:28px">${fmt(s.total)}<i>₫</i></div>
+    <p class="eyebrow">Đã sử dụng · tháng 9</p>
+    <div class="hero num">${fmt(s.total)}<i>₫</i></div>
     <div class="split">
       <div><h4>Tài khoản TCB</h4><div class="v num">${fmt(s.tcb)} <i>₫</i></div></div>
       <div><h4>Thẻ tín dụng</h4><div class="v num">${fmt(s.cc)} <i>₫</i></div></div>
@@ -656,7 +659,7 @@ const blocks = {
     const owed = BAL().ccUsed + BAL().ccInstallment;
     const avail = CARD.limit - owed;
     return `
-    <p class="eyebrow">Còn trong tài khoản</p>
+    <p class="eyebrow">Còn trong tài khoản${state.bal&&state.bal.asOf?` · chốt ${state.bal.asOf.slice(8)}/${state.bal.asOf.slice(5,7)}`:''}</p>
     <div class="hero num" style="font-size:28px">${fmt(BAL().tcb)}<i>₫</i></div>
     <div class="split">
       <div><h4>Thẻ tín dụng · đang nợ</h4>
@@ -705,6 +708,23 @@ const blocks = {
         <span class="nm" style="color:${C.muted}">Còn lại</span>
         <span class="rt"><b class="num">${fmt(rest)} ₫</b></span></div></div>` : '') +
       `</div><p class="hint" style="margin-top:2px">Chạm tên nhóm để mở · chạm giao dịch để đổi nhóm</p>`;
+  },
+
+  drift(){
+    const d = state.drift;
+    if(!d) return '';
+    const gap = d.real - d.expect;
+    return `<div class="card" style="border-left:2px solid ${C.negative}">
+      <h4>Số dư không khớp với giao dịch đã ghi</h4>
+      <div class="v num" style="color:${C.negative}">${gap>0?'+':''}${fmt(gap)} ₫</div>
+      <p>Từ ${d.from.slice(8)}/${d.from.slice(5,7)} đến ${d.to.slice(8)}/${d.to.slice(5,7)},
+      theo giao dịch thì số dư phải là ${fmt(d.expect)} ₫, ngân hàng báo ${fmt(d.real)} ₫.
+      ${gap<0?'Có thể còn giao dịch chưa nhập.':'Có thể nhập trùng hoặc thiếu khoản tiền vào.'}</p>
+      <div style="display:flex;gap:9px;margin-top:${S.sm}px">
+        <button class="btn ghost" style="flex:1" data-drift="clear">Bỏ qua</button>
+        <button class="btn" style="flex:1" data-tab="import">Nhập thêm</button>
+      </div>
+    </div>`;
   },
 
   offset(){
@@ -894,19 +914,14 @@ function importScreen(){
         <button data-imp="dedupe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Dọn ngay</button></p>
       </div>` : ''}
     ${state.tx.filter(t=>t.id.startsWith('i')).length ? `
-      <p class="hint" style="text-align:left;margin-top:${S.md}px">
-        Đang có ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch từ ảnh chụp.
-        <button data-imp="wipe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Xoá hết để nhập lại</button></p>` : ''}
-    ${r.bal && (r.bal.tcb||r.bal.ccUsed) ? `
+      <p class="hint" style="text-align:left;margin-top:${S.lg}px;color:${C.faint};font-size:11px">
+        ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch đã nhập từ ảnh ·
+        <button data-imp="wipe" style="color:${C.faint};border-bottom:1px solid ${C.line}">xoá hết</button></p>` : ''}
+    ${r.bal && r.bal.tcb ? `
       <div class="card" style="border-left:2px solid ${C.positive}">
         <h4>Tìm thấy số dư trong ảnh</h4>
-        ${r.bal.tcb?`<div class="rowline"><span>Tài khoản TCB</span>
-          <span class="num">${fmt(r.bal.tcb)} ₫</span></div>`:''}
-        ${r.bal.ccUsed?`<div class="rowline"><span>Thẻ · đã chi tiêu</span>
-          <span class="num">${fmt(r.bal.ccUsed)} ₫</span></div>`:''}
-        ${r.bal.ccInstallment?`<div class="rowline"><span>Thẻ · trả góp</span>
-          <span class="num">${fmt(r.bal.ccInstallment)} ₫</span></div>`:''}
-        <p><button data-imp="setbal" style="color:${C.accent};border-bottom:1px solid ${C.line}">Cập nhật số dư</button></p>
+        <p>App không hiện số dư, chỉ dùng nó để kiểm xem có giao dịch nào chụp sót không.</p>
+        <button class="btn" style="width:100%;margin-top:${S.sm}px" data-imp="setbal">Dùng để đối chiếu</button>
       </div>` : ''}
     ${r.rows ? `
       <h3 class="sec">Xem trước · ${r.dup} trùng sẽ bỏ qua</h3>
@@ -985,6 +1000,7 @@ function bind(){
     e.stopPropagation();
     state.tx = state.tx.filter(t=>t.id!==b.dataset.del);
     save(); render(); });
+  $('[data-drift]').forEach(b=>b.onclick=()=>{ state.drift=null; save(); render(); });
   $('[data-pairseen]').forEach(b=>b.onclick=()=>{
     state.pairSeen = state.pairSeen || {};
     offsetPairs().forEach(([a,c])=>{ state.pairSeen[a.id+'|'+c.id]=true; });
@@ -1003,8 +1019,24 @@ function bind(){
     const act=b.dataset.imp;
     if(act==='clear'){ state.imp=null; render(); return; }
     if(act==='setbal'){
-      state.bal={ ...(state.bal||{}), ...(state.imp.bal||{}) };
-      delete state.bal.ccAvail;
+      const now = new Date().toISOString().slice(0,10);
+      const nb  = { ...(state.imp.bal||{}) }; delete nb.ccAvail;
+      const old = state.bal;
+      let drift = null;
+      if(old && old.asOf && nb.tcb!=null && old.tcb!=null){
+        /* Số dư dự kiến = số dư lần trước + thu - chi qua TCB trong khoảng giữa hai lần */
+        const between = t => t.date > old.asOf && t.date <= now && t.src==='tcb';
+        let flow = 0;
+        state.tx.filter(between).forEach(t=>{
+          if(t.kind==='income') flow += t.amount;
+          else flow -= t.amount;            // chi, trả nợ, chuyển nội bộ đều là tiền ra
+        });
+        const expect = old.tcb + flow;
+        if(Math.abs(expect - nb.tcb) >= 1000) drift = { expect, real: nb.tcb, from: old.asOf, to: now };
+      }
+      state.bal = { ...(state.bal||{}), ...nb, asOf: now };
+      state.drift = drift;
+      state.imp = null;
       save(); render(); return;
     }
     if(act==='dedupe'){
