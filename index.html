@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b14';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b15';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -762,7 +762,9 @@ function reviewScreen(){
           <div class="chip ${cls}" data-chip="${t.id}"><b>${label}</b> · ${why}</div>
         </div>
         <div class="amt"><span class="num">${fmt(t.amount)}</span>
-          <span class="flag${state.flag[t.id]?' on':''}" data-flag="${t.id}">⚑</span></div>
+          <span class="flag${state.flag[t.id]?' on':''}" data-flag="${t.id}">⚑</span>
+          ${t.id.startsWith('i')?`<span class="flag" data-del="${t.id}"
+            style="color:${C.negative};opacity:.6">✕</span>`:''}</div>
       </div>
       ${state.picker===t.id ? pickerHTML(t, true) : ''}`;
     }).join('') + `</div>
@@ -790,9 +792,13 @@ function importScreen(){
       border-radius:${R.sm}px;padding:${S.sm}px;font:300 12px/1.5 ${THEME.font.family};
       resize:vertical">${r.raw||''}</textarea>
     <div style="display:flex;gap:9px;margin-top:${S.sm}px">
-      <button class="btn ghost" style="flex:1" data-imp="clear">Xoá</button>
+      <button class="btn ghost" style="flex:1" data-imp="clear">Xoá ô</button>
       <button class="btn" style="flex:1" data-imp="parse">Bóc thử</button>
     </div>
+    ${state.tx.filter(t=>t.id.startsWith('i')).length ? `
+      <p class="hint" style="text-align:left;margin-top:${S.md}px">
+        Đang có ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch từ ảnh chụp.
+        <button data-imp="wipe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Xoá hết để nhập lại</button></p>` : ''}
     ${r.rows ? `
       <h3 class="sec">Xem trước · ${r.dup} trùng sẽ bỏ qua</h3>
       ${r.rows.map(t=>`<div class="rowline"><span>
@@ -856,6 +862,10 @@ function bind(){
     const id=b.dataset.save;
     state.group[id]=state.pending[id];
     delete state.pending[id]; state.picker=null; save(); render(); });
+  $('[data-del]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    state.tx = state.tx.filter(t=>t.id!==b.dataset.del);
+    save(); render(); });
   $('[data-keeppairs]').forEach(b=>b.onclick=()=>{
     state.keepPairs=!state.keepPairs; save(); render(); });
   $('[data-flag]').forEach(f=>f.onclick=e=>{
@@ -869,12 +879,17 @@ function bind(){
     const box=document.getElementById('imp');
     const act=b.dataset.imp;
     if(act==='clear'){ state.imp=null; render(); return; }
+    if(act==='wipe'){
+      state.tx = state.tx.filter(t=>!t.id.startsWith('i'));
+      state.imp=null; save(); render(); return;
+    }
     if(act==='parse'){
       const raw=box.value;
       const rows=parseShot(raw, new Date().toISOString().slice(0,10), state.impSrc||'auto');
-      const have=new Set(state.tx.map(t=>t.date+'|'+t.amount+'|'+t.name.slice(0,10)));
+      const norm=x=>x.toUpperCase().replace(/[^A-Z0-9]/g,'');
+      const have=new Set(state.tx.map(t=>t.date+'|'+t.amount+'|'+norm(t.name)));
       let dup=0;
-      rows.forEach(t=>{ t.new=!have.has(t.date+'|'+t.amount+'|'+t.name.slice(0,10));
+      rows.forEach(t=>{ t.new=!have.has(t.date+'|'+t.amount+'|'+norm(t.name));
                         if(!t.new) dup++; });
       state.imp={ raw, rows, dup }; render(); return;
     }
