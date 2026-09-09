@@ -70,13 +70,14 @@ const LAYOUT = {
   /* Overview để gọn. Khối có sẵn dùng được:
      'balance' 'hero' 'groupsLite' 'groups' 'debtLine' 'recon' 'debtPaid' 'pending'
      Thêm tên vào mảng là hiện, bỏ ra là ẩn, đổi thứ tự là đổi vị trí. */
-  overview: ['balance','hero','groupsLite','debtLine','pending'],
+  overview: ['balance','hero','groupsLite','offset','debtLine','pending'],
   debt:     ['card','installment','loan'],
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b12';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b14';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
+const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
 const PINNED = { 'TRAN HUNG ANH':'Ăn uống' };
 /* Grab: dưới ngưỡng dưới → Đi lại, trên ngưỡng trên → Ăn uống,
@@ -188,13 +189,14 @@ function load(){
     pending:{},                   // id → nhóm mới, chưa lưu
     picker: null,                 // id đang mở bảng chọn nhóm
     impSrc: 'auto',               // nguồn ảnh khi nhập: auto | tcb | cc
+    keepPairs: saved.keepPairs || false,
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -298,9 +300,31 @@ function loanState(today = new Date()){
            endDate:new Date(first.getFullYear(), first.getMonth()+LOAN.months-1, first.getDate()) };
 }
 
+/* --- tìm cặp bù trừ: ứng tiền rồi được trả lại --- */
+function offsetPairs(){
+  const pairs=[], used=new Set();
+  const list=state.tx.filter(t=>t.kind==='expense'||t.kind==='income');
+  for(const a of list){
+    if(used.has(a.id) || a.kind!=='expense') continue;
+    const b=list.find(x=>!used.has(x.id) && x.id!==a.id && x.kind==='income'
+      && x.amount===a.amount
+      && x.name.trim().toUpperCase()===a.name.trim().toUpperCase()
+      && Math.abs(new Date(x.date)-new Date(a.date))/864e5 <= OFFSET_DAYS);
+    if(b){ used.add(a.id); used.add(b.id); pairs.push([a,b]); }
+  }
+  return pairs;
+}
+const offsetIds = () => {
+  const s=new Set();
+  if(state.keepPairs) return s;
+  offsetPairs().forEach(([a,b])=>{ s.add(a.id); s.add(b.id); });
+  return s;
+};
+
 /* --- tổng hợp --- */
 function summary(){
-  const ex = state.tx.filter(t=>t.kind==='expense');
+  const off = offsetIds();
+  const ex = state.tx.filter(t=>t.kind==='expense' && !off.has(t.id));
   const byGroup = {};
   ex.forEach(t=>{
     const g = groupOf(t) || 'Chờ gán';
@@ -311,7 +335,7 @@ function summary(){
   const tcb   = ex.filter(t=>t.src==='tcb').reduce((a,b)=>a+b.amount,0);
   const cc    = ex.filter(t=>t.src==='cc').reduce((a,b)=>a+b.amount,0);
   const debts = state.tx.filter(t=>['ccpay','internal','installment'].includes(t.kind));
-  const income= state.tx.filter(t=>t.kind==='income').reduce((a,b)=>a+b.amount,0);
+  const income= state.tx.filter(t=>t.kind==='income' && !off.has(t.id)).reduce((a,b)=>a+b.amount,0);
   const groups= Object.entries(byGroup).sort((a,b)=>b[1].v-a[1].v);
   return { total, tcb, cc, groups, debts, income, max: groups[0]?.[1].v || 1 };
 }
@@ -492,20 +516,40 @@ function tidy(n){
   return n.replace(/\s+(US\s+)?APPCODE.*$/i,'').replace(/\s+TID.*$/i,'')
           .replace(/\s+\d{6,}.*$/,'').replace(/[.…]+$/,'').trim();
 }
+const DESC_PAT = [
+  /GD\s+THE/i, /SO\s+THE/i, /APPCODE/i, /^NAP\s+VI/i, /^MBVCB/i, /^CASHIN/i,
+  /chuyen\s+tien/i, /chuyen$/i, /thanh\s*toan/i, /^TT\s/i, /^CK\s/i, /^MS\d/i,
+  /^VQR/i, /^KOVQR/i, /^\d[\d\s]{8,}$/, /Interest amount/i, /^Doi diem/i,
+];
+function isDescLine(l){
+  const t=l.trim();
+  if(DESC_PAT.some(r=>r.test(t))) return true;
+  if(/[a-zàáâãèéêìíòóôõùúýăđĩũơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/.test(t)
+     && !/^(Tiền|Grab|Payoo|Google|Anthropic)/i.test(t)) return true;
+  return false;
+}
+
 function parseShot(text, capture, force){
   const lines=text.split(/\r?\n/);
   const isCC = force==='cc' ? true
              : force==='tcb' ? false
-             : /thẻ tín dụng|lịch sử giao dịch|trả góp/i.test(text);
+             : (/thẻ tín dụng|trả góp hàng kỳ|chuyển đổi sang trả góp/i.test(text)
+                && !/thẻ thanh toán|tìm giao dịch/i.test(text));
   const out=[]; let cur=null, buf=[], pend=null;
   for(const raw of lines){
     const line=raw.trim(); if(!line||CHROME.some(r=>r.test(line))) continue;
     const d=readDate(line,capture); if(d){ cur=d; buf=[]; pend=null; continue; }
     const a=readAmt(line);
-    if(a){ pend={ date:cur, name:tidy(buf.join(' ')||'Không rõ'), note:'',
-                  amount:a.amount, sign:a.sign, src:isCC?'cc':'tcb' };
-           buf=[]; out.push(pend); continue; }
-    if(pend){ pend.note=line.replace(/[.…]+$/,''); pend=null; continue; }
+    if(a){
+      /* Không dựa vào vị trí — phân loại từng dòng trong buffer.
+         Dòng mô tả: có chữ thường, hoặc khớp mẫu quen của ngân hàng. */
+      const names=[], descs=[];
+      for(const b of buf) (isDescLine(b) ? descs : names).push(b);
+      out.push({ date:cur, name:tidy(names.join(' ')||descs.join(' ')||'Không rõ'),
+                 note:descs.join(' ').replace(/[.…]+$/,''),
+                 amount:a.amount, sign:a.sign, src:isCC?'cc':'tcb' });
+      buf=[]; continue;
+    }
     buf.push(line);
   }
   return out.map(t=>{
@@ -576,6 +620,20 @@ const blocks = {
         <span class="nm" style="color:${C.muted}">Còn lại</span>
         <span class="rt"><b class="num">${fmt(rest)} ₫</b></span></div></div>` : '') +
       `</div><p class="hint" style="margin-top:2px">Chạm tên nhóm để mở · chạm giao dịch để đổi nhóm</p>`;
+  },
+
+  offset(){
+    const pairs = offsetPairs();
+    if(!pairs.length) return '';
+    return `<div class="card" style="border-left:2px solid ${C.positive}">
+      <h4>Ứng rồi được trả lại — đã trừ khỏi chi tiêu</h4>
+      ${pairs.map(([a,b])=>`<div class="rowline"><span>${a.name}</span>
+        <span class="num">${fmt(a.amount)} ₫</span></div>`).join('')}
+      <p>Cùng tên, cùng số tiền, ngược chiều trong ${OFFSET_DAYS} ngày.
+      ${state.keepPairs?'Đang tính vào chi tiêu.':'Đang bỏ qua cả hai chiều.'}
+      <button data-keeppairs="1" style="color:${C.accent};border-bottom:1px solid ${C.line}">${
+        state.keepPairs?'Bỏ qua chúng':'Tính vào chi tiêu'}</button></p>
+    </div>`;
   },
 
   debtLine(){
@@ -798,6 +856,8 @@ function bind(){
     const id=b.dataset.save;
     state.group[id]=state.pending[id];
     delete state.pending[id]; state.picker=null; save(); render(); });
+  $('[data-keeppairs]').forEach(b=>b.onclick=()=>{
+    state.keepPairs=!state.keepPairs; save(); render(); });
   $('[data-flag]').forEach(f=>f.onclick=e=>{
     e.stopPropagation();
     const id=f.dataset.flag; state.flag[id]=!state.flag[id]; save(); render(); });
