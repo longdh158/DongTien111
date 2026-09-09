@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b11';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b12';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
 const PINNED = { 'TRAN HUNG ANH':'Ăn uống' };
@@ -320,11 +320,12 @@ function summary(){
    ██  GIAO DIỆN  ██
    ================================================================== */
 function css(){ return `
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
+  max-width:100%;overflow-wrap:anywhere}
 html,body{background:${C.ink};height:100%;overflow:hidden;overscroll-behavior:none}
 body{font-family:${THEME.font.family};color:${C.text};font-weight:300;line-height:1.5;
   position:fixed;inset:0;display:flex;justify-content:center}
-.num{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.num{font-variant-numeric:tabular-nums;letter-spacing:-.01em;overflow-wrap:normal}
 .phone{width:100%;background:${C.ink};
   height:100%;overflow:hidden;
   padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
@@ -342,7 +343,8 @@ header{flex:none;padding:calc(${S.sm}px + env(safe-area-inset-top)) ${S.lg}px ${
 .brand{font-size:15px;font-weight:600;letter-spacing:.02em}
 .brand span{color:${C.accent}}
 .hd-right{font-size:12px;color:${C.muted}}
-main{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+main{flex:1;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
   overscroll-behavior:contain;padding:${S.lg}px ${S.lg}px ${S.lg}px}
 main::-webkit-scrollbar{width:0}
 .eyebrow{font-size:12px;color:${C.faint};margin-bottom:${S.xs}px}
