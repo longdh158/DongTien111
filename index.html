@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b20';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b23';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -120,8 +120,12 @@ const SEED = {
     '2026-09': { opening:33226604, closing:null, incomes:[] },
   },
 
-  /* Giao dịch tháng 9, đã đối chiếu khớp với màn Thẻ tín dụng (lệch 0đ) */
+  /* Chỉ giữ tháng 9, đã đối chiếu khớp với màn Thẻ tín dụng (lệch 0đ).
+     Tháng 8 nhập bằng app từ ảnh chụp, không chép tay. */
   tx: [
+// ---- THẺ TÍN DỤNG (sao kê 04/09) ----
+// ---- TÀI KHOẢN THANH TOÁN ----
+
     // ngày, tên, mô tả, số tiền, nguồn(tcb|cc), loại
     ['2026-09-08','Công ty TNHH Đầu tư Tâm Thức','',531360,'tcb','expense'],
     ['2026-09-08','DL Sweets Vincom','',170000,'tcb','expense'],
@@ -159,6 +163,11 @@ const SEED = {
     ['2026-09-03','Chuyển sang tài khoản của mình','Trả nợ SC',2660000,'tcb','internal'],
     ['2026-09-03','TRINH THI BICH HIEN','',105000,'tcb','expense'],
     ['2026-09-03','VU THI MAI PHUONG','',360000,'tcb','expense'],
+
+    /* ===== THÁNG 8 — từ sao kê thẻ tín dụng, kỳ 06/08–04/09 ===== */
+    /* hai giao dịch thẻ đầu tháng 9, sao kê ghi nhưng ảnh chụp không thấy */
+    ['2026-09-02','Grab','',479636,'cc','expense'],
+    ['2026-09-03','Grab','',48614,'cc','expense'],
   ],
 };
 
@@ -180,8 +189,11 @@ function load(){
     src:t[4], kind:t[5],
   }));
   const wantTab = /nhap/i.test(location.hash) ? 'import' : 'overview';
+  const MONTHS = ['2026-08','2026-09','2026-10'];
   return {
     tab: wantTab,
+    month: saved.month || '2026-09',
+    MONTHS,
     tx: tx.concat(saved.tx || []),
     group:  saved.group  || {},   // id → nhóm đại ca chọn
     flag:   saved.flag   || {},   // id → bất thường
@@ -192,13 +204,14 @@ function load(){
     impSrc: 'auto',               // nguồn ảnh khi nhập: auto | tcb | cc
     keepPairs: saved.keepPairs || false,
     bal: saved.bal || null,
+    pairSeen: saved.pairSeen || {},
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -226,6 +239,7 @@ function applyRemote(d){
   state.done  = d.done  || {};
   state.closing = d.closing ?? null;
   state.bal = d.bal || null;
+  state.pairSeen = d.pairSeen || {};
   const seedIds = new Set(SEED.tx.map((_,i)=>'t'+i));
   state.tx = state.tx.filter(t=>seedIds.has(t.id)).concat(d.tx||[]);
   _remote = false;
@@ -348,9 +362,21 @@ const offsetIds = () => {
 };
 
 /* --- tổng hợp --- */
+function inMonth(t, m){ return String(t.date).slice(0,7) === (m||state.month); }
+const prevMonth = m => { const [y,mm]=(m||state.month).split('-').map(Number);
+  return mm===1 ? `${y-1}-12` : `${y}-${String(mm-1).padStart(2,'0')}`; };
+
+/* tổng theo nhóm của một tháng bất kỳ — dùng cho phần so sánh */
+function groupTotals(m){
+  const off=offsetIds(), r={};
+  state.tx.filter(t=>t.kind==='expense' && inMonth(t,m) && !off.has(t.id))
+    .forEach(t=>{ const g=groupOf(t)||'Chờ gán'; r[g]=(r[g]||0)+t.amount; });
+  return r;
+}
+
 function summary(){
   const off = offsetIds();
-  const ex = state.tx.filter(t=>t.kind==='expense');
+  const ex = state.tx.filter(t=>t.kind==='expense' && inMonth(t));
   const byGroup = {};
   ex.forEach(t=>{
     const g = groupOf(t) || 'Chờ gán';
@@ -362,8 +388,8 @@ function summary(){
   const total = live.reduce((a,b)=>a+b.amount,0);
   const tcb   = live.filter(t=>t.src==='tcb').reduce((a,b)=>a+b.amount,0);
   const cc    = live.filter(t=>t.src==='cc').reduce((a,b)=>a+b.amount,0);
-  const debts = state.tx.filter(t=>['ccpay','internal','installment'].includes(t.kind));
-  const income= state.tx.filter(t=>t.kind==='income' && !off.has(t.id)).reduce((a,b)=>a+b.amount,0);
+  const debts = state.tx.filter(t=>['ccpay','internal','installment'].includes(t.kind) && inMonth(t));
+  const income= state.tx.filter(t=>t.kind==='income' && inMonth(t) && !off.has(t.id)).reduce((a,b)=>a+b.amount,0);
   const groups= Object.entries(byGroup).sort((a,b)=>b[1].v-a[1].v);
   return { total, tcb, cc, groups, debts, income, max: groups[0]?.[1].v || 1 };
 }
@@ -645,13 +671,21 @@ const blocks = {
   },
 
   groupsLite(s){
+    const prev = groupTotals(prevMonth());
+    const hasPrev = Object.keys(prev).length > 0;
     const top = s.groups.slice(0, TOP_N);
     const rest = s.groups.slice(TOP_N).reduce((a,b)=>a+b[1].v,0);
     return `<div class="bars">` + top.map(([g,d])=>`
       <div class="bar${state.open[g]?' open':''}">
         <div class="top" data-toggle="${g}">
           <span class="nm" style="color:${g==='Chờ gán'?C.accent:C.text}"><em>›</em>${g}</span>
-          <span class="rt"><b class="num" style="color:${g==='Chờ gán'?C.accent:C.text}">${fmt(d.v)} ₫</b></span>
+          <span class="rt"><b class="num" style="color:${g==='Chờ gán'?C.accent:C.text}">${fmt(d.v)} ₫</b>${
+            (()=>{ if(!hasPrev) return '<span class="dlt">–</span>';
+                   const p=prev[g]; if(!p) return '<span class="dlt">mới</span>';
+                   const dd=Math.ceil(Math.abs((d.v-p)/p*100))*(d.v>=p?1:-1);
+                   if(dd===0) return '<span class="dlt">0%</span>';
+                   return `<span class="dlt" style="color:${dd>0?C.negative:C.positive}">${
+                     dd>0?'▲':'▼'} ${Math.abs(dd)}%</span>`; })()}</span>
         </div>
         <div class="track"><i style="width:${(d.v/s.max*100).toFixed(1)}%;opacity:${g==='Chờ gán'?1:.75}"></i></div>
         <div class="detail">${d.items.slice().sort((a,b)=>b.amount-a.amount).map(t=>`
@@ -674,16 +708,20 @@ const blocks = {
   },
 
   offset(){
-    const pairs = offsetPairs();
+    const seen = state.pairSeen || {};
+    const pairs = offsetPairs().filter(([a,b])=>!seen[a.id+'|'+b.id]);
     if(!pairs.length) return '';
     return `<div class="card" style="border-left:2px solid ${C.positive}">
       <h4>Ứng rồi được trả lại — đã trừ khỏi chi tiêu</h4>
       ${pairs.map(([a,b])=>`<div class="rowline"><span>${a.name}</span>
         <span class="num">${fmt(a.amount)} ₫</span></div>`).join('')}
       <p>Cùng tên, cùng số tiền, ngược chiều trong ${OFFSET_DAYS} ngày.
-      ${state.keepPairs?'Đang tính vào chi tiêu.':'Đang bỏ qua cả hai chiều.'}
-      <button data-keeppairs="1" style="color:${C.accent};border-bottom:1px solid ${C.line}">${
-        state.keepPairs?'Bỏ qua chúng':'Tính vào chi tiêu'}</button></p>
+      ${state.keepPairs?'Đang tính vào chi tiêu.':'Đang bỏ qua cả hai chiều.'}</p>
+      <div style="display:flex;gap:9px;margin-top:${S.sm}px">
+        <button class="btn ghost" style="flex:1" data-keeppairs="1">${
+          state.keepPairs?'Bỏ qua chúng':'Tính vào chi tiêu'}</button>
+        <button class="btn" style="flex:1" data-pairseen="1">Đúng rồi, ẩn đi</button>
+      </div>
     </div>`;
   },
 
@@ -898,7 +936,7 @@ function render(){
     <div class="phone">
       <header><div class="brand">Dòng <span>Tiền</span>
           <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD} ${innerWidth}×${innerHeight} dpr${devicePixelRatio} ${matchMedia('(display-mode: standalone)').matches?'PWA':'safari'}</span></div>
-        <div class="hd-right">Tháng 9, 2026<br>
+Tháng 9, 2026<br>
           <span id="sync" style="font-size:10px;color:${C.faint}">…</span>
           ${_uid?'':`<br><button onclick="dtLogin()" style="font-size:10px;color:${C.accent};
             border-bottom:1px solid ${C.line}">Đăng nhập Google</button>`}
@@ -916,6 +954,9 @@ function render(){
 function bind(){
   const $ = q => [...document.querySelectorAll(q)];
   $('[data-tab]').forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; render(); });
+  $('[data-month]').forEach(b=>b.onclick=()=>{
+    const i=MONTHS.indexOf(state.month);
+    state.month=MONTHS[(i+1)%MONTHS.length]; save(); render(); });
   $('[data-toggle]').forEach(b=>b.onclick=()=>{
     const g=b.dataset.toggle; state.open[g]=!state.open[g]; render(); });
   $('[data-chip]').forEach(c=>c.onclick=e=>{
@@ -941,6 +982,10 @@ function bind(){
   $('[data-del]').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
     state.tx = state.tx.filter(t=>t.id!==b.dataset.del);
+    save(); render(); });
+  $('[data-pairseen]').forEach(b=>b.onclick=()=>{
+    state.pairSeen = state.pairSeen || {};
+    offsetPairs().forEach(([a,c])=>{ state.pairSeen[a.id+'|'+c.id]=true; });
     save(); render(); });
   $('[data-keeppairs]').forEach(b=>b.onclick=()=>{
     state.keepPairs=!state.keepPairs; save(); render(); });
