@@ -322,13 +322,14 @@ html,body{background:${C.ink};height:100%;overflow:hidden;overscroll-behavior:no
 body{font-family:${THEME.font.family};color:${C.text};font-weight:300;line-height:1.5;
   position:fixed;inset:0;display:flex;justify-content:center}
 .num{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
-.phone{width:100%;max-width:${THEME.maxWidth}px;background:${C.ink};
+.phone{width:100%;background:${C.ink};
   height:100%;overflow:hidden;
+  padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
   display:grid;grid-template-rows:auto minmax(0,1fr) auto}
 /* Trên màn hình rộng thì bo khung cho giống điện thoại */
 @media (min-width:520px) and (min-height:700px){
   body{padding:${S.md}px 0}
-  .phone{height:calc(100% - ${S.md*2}px);border:1px solid ${C.line};
+  .phone{max-width:${THEME.maxWidth}px;height:calc(100% - ${S.md*2}px);border:1px solid ${C.line};
     border-radius:${R.phone}px;box-shadow:0 30px 70px rgba(0,0,0,.45)}
 }
 header{flex:none;padding:calc(${S.sm}px + env(safe-area-inset-top)) ${S.lg}px ${S.sm+2}px;
