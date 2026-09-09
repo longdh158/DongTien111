@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b9';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b11';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
 const PINNED = { 'TRAN HUNG ANH':'Ăn uống' };
@@ -177,8 +177,9 @@ function load(){
     id:'t'+i, date:t[0], name:t[1], note:t[2], amount:t[3],
     src:t[4], kind:t[5],
   }));
+  const wantTab = /nhap/i.test(location.hash) ? 'import' : 'overview';
   return {
-    tab: 'overview',
+    tab: wantTab,
     tx: tx.concat(saved.tx || []),
     group:  saved.group  || {},   // id → nhóm đại ca chọn
     flag:   saved.flag   || {},   // id → bất thường
@@ -186,6 +187,7 @@ function load(){
     open:   {},                   // nhóm nào đang bung
     pending:{},                   // id → nhóm mới, chưa lưu
     picker: null,                 // id đang mở bảng chọn nhóm
+    impSrc: 'auto',               // nguồn ảnh khi nhập: auto | tcb | cc
     closing: saved.closing ?? null,
   };
 }
@@ -488,9 +490,11 @@ function tidy(n){
   return n.replace(/\s+(US\s+)?APPCODE.*$/i,'').replace(/\s+TID.*$/i,'')
           .replace(/\s+\d{6,}.*$/,'').replace(/[.…]+$/,'').trim();
 }
-function parseShot(text, capture){
+function parseShot(text, capture, force){
   const lines=text.split(/\r?\n/);
-  const isCC=/thẻ tín dụng|lịch sử giao dịch|trả góp/i.test(text);
+  const isCC = force==='cc' ? true
+             : force==='tcb' ? false
+             : /thẻ tín dụng|lịch sử giao dịch|trả góp/i.test(text);
   const out=[]; let cur=null, buf=[], pend=null;
   for(const raw of lines){
     const line=raw.trim(); if(!line||CHROME.some(r=>r.test(line))) continue;
@@ -715,8 +719,12 @@ function importScreen(){
   return `<p class="eyebrow">Nhập dữ liệu</p>
     <div class="hero num" style="font-size:26px">${r.rows?`${r.rows.length} giao dịch`:'Dán chữ từ ảnh'}</div>
     <p class="hint" style="text-align:left;margin-top:${S.sm}px;line-height:1.6">
-      Mở ảnh chụp trong Ảnh → chạm giữ để chọn chữ → Sao chép →
-      dán vào ô dưới. iPhone tự đọc chữ trong ảnh, không cần app khác.</p>
+      Mở ảnh chụp trong Ảnh → chạm giữ chọn chữ → Sao chép → dán vào ô dưới.</p>
+    <h3 class="sec">Ảnh này chụp từ đâu</h3>
+    <div class="picker" style="border:none;padding-left:0">
+      ${[['auto','Tự nhận'],['tcb','Tài khoản'],['cc','Thẻ tín dụng']].map(([v,l])=>
+        `<button data-src="${v}" class="${(state.impSrc||'auto')===v?'cur':''}">${l}</button>`).join('')}
+    </div>
     <textarea id="imp" placeholder="Dán vào đây..." style="width:100%;min-height:120px;
       margin-top:${S.md}px;background:${C.surface};color:${C.text};border:1px solid ${C.line};
       border-radius:${R.sm}px;padding:${S.sm}px;font:300 12px/1.5 ${THEME.font.family};
@@ -791,13 +799,17 @@ function bind(){
   $('[data-flag]').forEach(f=>f.onclick=e=>{
     e.stopPropagation();
     const id=f.dataset.flag; state.flag[id]=!state.flag[id]; save(); render(); });
+  $('[data-src]').forEach(b=>b.onclick=()=>{
+    const box=document.getElementById('imp');
+    state.imp = state.imp ? {...state.imp, raw:(box?box.value:state.imp.raw)} : null;
+    state.impSrc = b.dataset.src; render(); });
   $('[data-imp]').forEach(b=>b.onclick=()=>{
     const box=document.getElementById('imp');
     const act=b.dataset.imp;
     if(act==='clear'){ state.imp=null; render(); return; }
     if(act==='parse'){
       const raw=box.value;
-      const rows=parseShot(raw, new Date().toISOString().slice(0,10));
+      const rows=parseShot(raw, new Date().toISOString().slice(0,10), state.impSrc||'auto');
       const have=new Set(state.tx.map(t=>t.date+'|'+t.amount+'|'+t.name.slice(0,10)));
       let dup=0;
       rows.forEach(t=>{ t.new=!have.has(t.date+'|'+t.amount+'|'+t.name.slice(0,10));
