@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b15';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b17';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -300,6 +300,25 @@ function loanState(today = new Date()){
            endDate:new Date(first.getFullYear(), first.getMonth()+LOAN.months-1, first.getDate()) };
 }
 
+/* --- tìm bản ghi trùng đã nằm trong sổ ---
+   Cùng ngày, cùng số tiền, cùng nguồn thì chỉ giữ một.
+   Ưu tiên giữ bản có sẵn trong app, xoá bản nhập từ ảnh. */
+function dupExtras(){
+  const groups={};
+  state.tx.forEach(t=>{
+    const k=t.date+'|'+t.amount+'|'+t.src;
+    (groups[k]=groups[k]||[]).push(t);
+  });
+  const extras=[];
+  Object.values(groups).forEach(g=>{
+    if(g.length<2) return;
+    const seed=g.find(t=>!t.id.startsWith('i'));
+    const keep=seed||g[0];
+    g.forEach(t=>{ if(t!==keep && t.id.startsWith('i')) extras.push(t); });
+  });
+  return extras;
+}
+
 /* --- tìm cặp bù trừ: ứng tiền rồi được trả lại --- */
 function offsetPairs(){
   const pairs=[], used=new Set();
@@ -504,7 +523,7 @@ function readAmt(line){
   return { amount:parseInt(dg,10), sign:(m[1]&&/\+/.test(m[1]))?'+':'-' };
 }
 function tidy(n){
-  n=n.trim();
+  n=n.trim().replace(/^[•·\-–—\s]+/,'');
   if(/^Grab\*/i.test(n)) return 'Grab';
   const m=n.match(/^PAYOO[-\s]+([A-Z0-9]+)/i); if(m) return 'Payoo · '+m[1];
   if(/ONLINE MOBILE SERVICES/i.test(n)) return 'MoMo';
@@ -795,6 +814,15 @@ function importScreen(){
       <button class="btn ghost" style="flex:1" data-imp="clear">Xoá ô</button>
       <button class="btn" style="flex:1" data-imp="parse">Bóc thử</button>
     </div>
+    ${dupExtras().length ? `
+      <div class="card" style="border-left:2px solid ${C.negative}">
+        <h4>Có bản ghi trùng trong sổ</h4>
+        <div class="v num">${dupExtras().length} dòng</div>
+        ${dupExtras().slice(0,6).map(t=>`<div class="rowline"><span>${t.name}</span>
+          <span class="num">${fmt(t.amount)} ₫</span></div>`).join('')}
+        <p>Cùng ngày, cùng số tiền, cùng nguồn với một dòng đã có.
+        <button data-imp="dedupe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Dọn ngay</button></p>
+      </div>` : ''}
     ${state.tx.filter(t=>t.id.startsWith('i')).length ? `
       <p class="hint" style="text-align:left;margin-top:${S.md}px">
         Đang có ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch từ ảnh chụp.
@@ -879,6 +907,11 @@ function bind(){
     const box=document.getElementById('imp');
     const act=b.dataset.imp;
     if(act==='clear'){ state.imp=null; render(); return; }
+    if(act==='dedupe'){
+      const bad=new Set(dupExtras().map(t=>t.id));
+      state.tx=state.tx.filter(t=>!bad.has(t.id));
+      save(); render(); return;
+    }
     if(act==='wipe'){
       state.tx = state.tx.filter(t=>!t.id.startsWith('i'));
       state.imp=null; save(); render(); return;
@@ -886,11 +919,18 @@ function bind(){
     if(act==='parse'){
       const raw=box.value;
       const rows=parseShot(raw, new Date().toISOString().slice(0,10), state.impSrc||'auto');
-      const norm=x=>x.toUpperCase().replace(/[^A-Z0-9]/g,'');
-      const have=new Set(state.tx.map(t=>t.date+'|'+t.amount+'|'+norm(t.name)));
+      /* So theo ngày + số tiền + nguồn, đếm số lượng.
+         Tên không dùng để so vì OCR và dữ liệu cũ viết khác nhau,
+         nhưng vẫn cho phép hai giao dịch trùng tiền thật trong cùng ngày. */
+      const key=t=>t.date+'|'+t.amount+'|'+t.src;
+      const have={};
+      state.tx.forEach(t=>{ have[key(t)]=(have[key(t)]||0)+1; });
       let dup=0;
-      rows.forEach(t=>{ t.new=!have.has(t.date+'|'+t.amount+'|'+norm(t.name));
-                        if(!t.new) dup++; });
+      rows.forEach(t=>{
+        const k=key(t);
+        if((have[k]||0) > 0){ have[k]--; t.new=false; dup++; }
+        else { t.new=true; }
+      });
       state.imp={ raw, rows, dup }; render(); return;
     }
     if(act==='commit'){
