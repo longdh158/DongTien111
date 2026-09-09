@@ -77,7 +77,7 @@ const LAYOUT = {
   month:    ['incomes'],
 };
 
-const BUILD = 'b27';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b29';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -208,13 +208,16 @@ function load(){
     bal: saved.bal || null,
     pairSeen: saved.pairSeen || {},
     drift: saved.drift || null,
+    impAck: saved.impAck || 0,
+    lastBatch: saved.lastBatch || null,
+    confirmWipe: false,
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month, drift:state.drift,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month, drift:state.drift, impAck:state.impAck, lastBatch:state.lastBatch,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -914,9 +917,22 @@ function importScreen(){
         <button data-imp="dedupe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Dọn ngay</button></p>
       </div>` : ''}
     ${state.tx.filter(t=>t.id.startsWith('i')).length ? `
-      <p class="hint" style="text-align:left;margin-top:${S.lg}px;color:${C.faint};font-size:11px">
-        ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch đã nhập từ ảnh ·
-        <button data-imp="wipe" style="color:${C.faint};border-bottom:1px solid ${C.line}">xoá hết</button></p>` : ''}
+      ${(()=>{ const n=state.tx.filter(t=>t.id.startsWith('i')).length;
+        if(state.impAck>=n) return '';
+        const last=state.tx.filter(t=>t.batch===state.lastBatch).length;
+        return `<div class="card" style="margin-top:${S.lg}px">
+          <h4>Đã nhập ${n} giao dịch từ ảnh</h4>
+          <p>Kiểm ở tab Duyệt xem đúng chưa. Sai thì hoàn tác lần nhập vừa rồi,
+          hoặc xoá từng dòng bằng nút ✕.</p>
+          <div style="display:flex;gap:9px;margin-top:${S.sm}px">
+            ${last?`<button class="btn ghost" style="flex:1" data-imp="undo">Hoàn tác ${last} dòng vừa nhập</button>`:''}
+            <button class="btn" style="flex:1" data-imp="ack">Đúng rồi</button>
+          </div>
+          <p style="margin-top:${S.sm}px;font-size:11px;color:${C.faint}">
+            ${state.confirmWipe
+              ? `Xoá toàn bộ ${n} giao dịch đã nhập? <button data-imp="wipe" style="color:${C.negative};border-bottom:1px solid ${C.negative}">Xoá thật</button> · <button data-imp="nowipe" style="color:${C.faint};border-bottom:1px solid ${C.line}">thôi</button>`
+              : `<button data-imp="askwipe" style="color:${C.faint};border-bottom:1px solid ${C.line}">xoá hết và nhập lại từ đầu</button>`}</p>
+        </div>`; })()}` : ''}
     ${r.bal && r.bal.tcb ? `
       <div class="card" style="border-left:2px solid ${C.positive}">
         <h4>Tìm thấy số dư trong ảnh</h4>
@@ -924,10 +940,15 @@ function importScreen(){
         <button class="btn" style="width:100%;margin-top:${S.sm}px" data-imp="setbal">Dùng để đối chiếu</button>
       </div>` : ''}
     ${r.rows ? `
+      ${r.rows.some(t=>t.noDate) ? `<div class="card" style="border-left:2px solid ${C.negative}">
+        <h4>${r.rows.filter(t=>t.noDate).length} dòng không có ngày</h4>
+        <p>Ảnh bị cắt mất tiêu đề ngày ở phía trên. Mấy dòng này sẽ không được nhập —
+        chụp lại tấm đó sao cho thấy dòng ngày rồi dán lại.</p></div>` : ''}
       <h3 class="sec">Xem trước · ${r.dup} trùng sẽ bỏ qua</h3>
       ${r.rows.map(t=>`<div class="rowline"><span>
         <i class="src ${t.src==='cc'?'cc':''}">${t.src==='cc'?'CREDIT':'DEBIT'}</i>
-        ${t.name}${t.new?'':' <span style="color:'+C.faint+'">· đã có</span>'}</span>
+        ${t.name}${t.noDate?' <span style="color:'+C.negative+'">· thiếu ngày</span>'
+          :(t.new?'':' <span style="color:'+C.faint+'">· đã có</span>')}</span>
         <span class="num">${t.sign==='+'?'+':''}${fmt(t.amount)}</span></div>`).join('')}
       <button class="btn" style="width:100%;margin-top:${S.md}px" data-imp="commit">
         Nhập ${r.rows.filter(x=>x.new).length} giao dịch mới</button>` : ''}`;
@@ -1044,7 +1065,15 @@ function bind(){
       state.tx=state.tx.filter(t=>!bad.has(t.id));
       save(); render(); return;
     }
+    if(act==='ack'){ state.impAck=state.tx.filter(t=>t.id.startsWith('i')).length; save(); render(); return; }
+    if(act==='undo'){
+      state.tx=state.tx.filter(t=>t.batch!==state.lastBatch);
+      state.lastBatch=null; save(); render(); return;
+    }
+    if(act==='askwipe'){ state.confirmWipe=true; render(); return; }
+    if(act==='nowipe'){ state.confirmWipe=false; render(); return; }
     if(act==='wipe'){
+      state.confirmWipe=false;
       state.tx = state.tx.filter(t=>!t.id.startsWith('i'));
       state.imp=null; save(); render(); return;
     }
@@ -1059,6 +1088,7 @@ function bind(){
       state.tx.forEach(t=>{ have[key(t)]=(have[key(t)]||0)+1; });
       let dup=0;
       rows.forEach(t=>{
+        if(!t.date){ t.new=false; t.noDate=true; return; }   // thiếu ngày → không nhập
         const k=key(t);
         if((have[k]||0) > 0){ have[k]--; t.new=false; dup++; }
         else { t.new=true; }
@@ -1067,8 +1097,11 @@ function bind(){
     }
     if(act==='commit'){
       const add=(state.imp.rows||[]).filter(t=>t.new);
-      add.forEach((t,i)=>state.tx.push({ id:'i'+Date.now()+i, date:t.date, name:t.name,
+      const batch='b'+Date.now();
+      add.forEach((t,i)=>state.tx.push({ id:'i'+Date.now()+i, batch, date:t.date, name:t.name,
         note:t.note, amount:t.amount, src:t.src, kind:t.kind }));
+      state.lastBatch = add.length ? batch : state.lastBatch;
+      state.impAck = 0;
       state.imp=null; state.tab='review'; save(); render();
     }
   });
