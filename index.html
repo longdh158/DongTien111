@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b17';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b19';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -170,6 +170,7 @@ const fmt = n => Math.round(n).toLocaleString('vi-VN');
 const K = 'dongtien.v1';
 
 let state = load();
+const BAL = () => ({ ...SEED.balances, ...(state.bal||{}) });
 
 function load(){
   let saved = {};
@@ -190,13 +191,14 @@ function load(){
     picker: null,                 // id đang mở bảng chọn nhóm
     impSrc: 'auto',               // nguồn ảnh khi nhập: auto | tcb | cc
     keepPairs: saved.keepPairs || false,
+    bal: saved.bal || null,
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -223,6 +225,7 @@ function applyRemote(d){
   state.flag  = d.flag  || {};
   state.done  = d.done  || {};
   state.closing = d.closing ?? null;
+  state.bal = d.bal || null;
   const seedIds = new Set(SEED.tx.map((_,i)=>'t'+i));
   state.tx = state.tx.filter(t=>seedIds.has(t.id)).concat(d.tx||[]);
   _remote = false;
@@ -343,16 +346,18 @@ const offsetIds = () => {
 /* --- tổng hợp --- */
 function summary(){
   const off = offsetIds();
-  const ex = state.tx.filter(t=>t.kind==='expense' && !off.has(t.id));
+  const ex = state.tx.filter(t=>t.kind==='expense');
   const byGroup = {};
   ex.forEach(t=>{
     const g = groupOf(t) || 'Chờ gán';
     (byGroup[g] = byGroup[g] || {v:0, items:[]});
-    byGroup[g].v += t.amount; byGroup[g].items.push(t);
+    if(!off.has(t.id)) byGroup[g].v += t.amount;
+    byGroup[g].items.push(t);
   });
-  const total = ex.reduce((a,b)=>a+b.amount,0);
-  const tcb   = ex.filter(t=>t.src==='tcb').reduce((a,b)=>a+b.amount,0);
-  const cc    = ex.filter(t=>t.src==='cc').reduce((a,b)=>a+b.amount,0);
+  const live  = ex.filter(t=>!off.has(t.id));
+  const total = live.reduce((a,b)=>a+b.amount,0);
+  const tcb   = live.filter(t=>t.src==='tcb').reduce((a,b)=>a+b.amount,0);
+  const cc    = live.filter(t=>t.src==='cc').reduce((a,b)=>a+b.amount,0);
   const debts = state.tx.filter(t=>['ccpay','internal','installment'].includes(t.kind));
   const income= state.tx.filter(t=>t.kind==='income' && !off.has(t.id)).reduce((a,b)=>a+b.amount,0);
   const groups= Object.entries(byGroup).sort((a,b)=>b[1].v-a[1].v);
@@ -548,6 +553,28 @@ function isDescLine(l){
   return false;
 }
 
+/* Đọc số dư từ ảnh Trang chủ hoặc màn Thẻ tín dụng.
+   Bám vào nhãn đứng cạnh con số, không đoán mò. */
+function parseBalance(text){
+  const L=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const num=x=>{ const d=String(x).replace(/[Oo]/g,'0').replace(/[^\d]/g,''); 
+                 return d.length>=4 ? parseInt(d,10) : null; };
+  const out={};
+  for(let i=0;i<L.length;i++){
+    const l=L[i];
+    if(/số dư hiện có/i.test(l)){
+      for(let j=i;j<Math.min(i+3,L.length);j++){
+        const m=L[j].match(/VND\s*([\d.,]+)/i) || (j>i && L[j].match(/^([\d.,]{7,})$/));
+        if(m){ out.tcb=num(m[1]); break; }
+      }
+    }
+    if(/^đã chi tiêu$/i.test(l) && L[i+3]) {           // hàng nhãn rồi hàng số
+      out.ccUsed=num(L[i+3]); out.ccInstallment=num(L[i+4]); out.ccAvail=num(L[i+5]);
+    }
+  }
+  return out;
+}
+
 function parseShot(text, capture, force){
   const lines=text.split(/\r?\n/);
   const isCC = force==='cc' ? true
@@ -596,11 +623,11 @@ const blocks = {
   },
 
   balance(){
-    const owed = SEED.balances.ccUsed + SEED.balances.ccInstallment;
+    const owed = BAL().ccUsed + BAL().ccInstallment;
     const avail = CARD.limit - owed;
     return `
     <p class="eyebrow">Còn trong tài khoản</p>
-    <div class="hero num" style="font-size:28px">${fmt(SEED.balances.tcb)}<i>₫</i></div>
+    <div class="hero num" style="font-size:28px">${fmt(BAL().tcb)}<i>₫</i></div>
     <div class="split">
       <div><h4>Thẻ tín dụng · đang nợ</h4>
         <div class="v num" style="color:${C.negative}">${fmt(owed)} <i>₫</i></div></div>
@@ -624,7 +651,8 @@ const blocks = {
         </div>
         <div class="track"><i style="width:${(d.v/s.max*100).toFixed(1)}%;opacity:${g==='Chờ gán'?1:.75}"></i></div>
         <div class="detail">${d.items.slice().sort((a,b)=>b.amount-a.amount).map(t=>`
-          <div class="tx" data-cycle="${t.id}"><span class="l"><b>${t.name}</b>
+          <div class="tx" data-cycle="${t.id}" style="${offsetIds().has(t.id)?'opacity:.45':''}">
+            <span class="l"><b>${t.name}${offsetIds().has(t.id)?' <span style="color:'+C.positive+';font-size:10px">bù trừ</span>':''}</b>
             <span class="meta">
               <i class="src ${t.src==='cc'?'cc':''}">${t.src==='cc'?'CREDIT':'DEBIT'}</i>
               <span class="num">${t.date.slice(8)}/${t.date.slice(5,7)}</span>
@@ -657,11 +685,11 @@ const blocks = {
 
   debtLine(){
     const L = loanState();
-    const total = SEED.balances.ccUsed + SEED.balances.ccInstallment + L.balance;
+    const total = BAL().ccUsed + BAL().ccInstallment + L.balance;
     return `<div class="card" style="margin-top:${S.lg}px">
       <h4>Tổng đang nợ</h4>
       <div class="v num">${fmt(total)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
-      <div class="s">Thẻ ${fmt(SEED.balances.ccUsed+SEED.balances.ccInstallment)} · vay SC ${fmt(L.balance)}</div>
+      <div class="s">Thẻ ${fmt(BAL().ccUsed+BAL().ccInstallment)} · vay SC ${fmt(L.balance)}</div>
     </div>`;
   },
 
@@ -702,14 +730,14 @@ const blocks = {
       <button class="btn" data-tab="review">Duyệt</button></div>`;
   },
 
-  card(){ const used = SEED.balances.ccUsed, inst = SEED.balances.ccInstallment;
+  card(){ const used = BAL().ccUsed, inst = BAL().ccInstallment;
     return `<div class="card accent"><h4>Dư nợ thẻ đang phát sinh</h4>
       <div class="v num">${fmt(used)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
       <p>Hạn mức ${fmt(CARD.limit)} ₫ · đã dùng ${Math.round((used+inst)/CARD.limit*100)}%.
       Sao kê chốt ngày ${CARD.statementDay}, hạn trả ngày ${CARD.dueDay}.</p></div>`;
   },
 
-  installment(){ const inst = SEED.balances.ccInstallment;
+  installment(){ const inst = BAL().ccInstallment;
     return `<div class="card neg"><h4>Trả góp trên thẻ</h4>
       <div class="v num">${fmt(inst)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
       <p>4 gói chuyển đổi 26/08, mỗi gói 3 kỳ, còn 2 kỳ.
@@ -730,7 +758,7 @@ const blocks = {
   balances(){ const m = SEED.months['2026-09'];
     return `<h3 class="sec">Số dư</h3>
       <div class="field"><label>Đầu tháng 9</label><span class="val num">${fmt(m.opening)} ₫</span></div>
-      <div class="field"><label>Hiện tại</label><span class="val num">${fmt(SEED.balances.tcb)} ₫</span></div>
+      <div class="field"><label>Hiện tại</label><span class="val num">${fmt(BAL().tcb)} ₫</span></div>
       <div class="field"><label>Cuối tháng</label><span class="val empty">chưa chốt</span></div>`;
   },
 
@@ -752,13 +780,13 @@ const blocks = {
 
   accounts(){ const L = loanState();
     return `<h3 class="sec">Tài khoản</h3>
-      <div class="rowline"><span>Techcombank</span><span class="num">${fmt(SEED.balances.tcb)} ₫</span></div>
+      <div class="rowline"><span>Techcombank</span><span class="num">${fmt(BAL().tcb)} ₫</span></div>
       <div class="rowline"><span>Thẻ tín dụng</span>
-        <span class="num" style="color:${C.negative}">− ${fmt(SEED.balances.ccUsed+SEED.balances.ccInstallment)} ₫</span></div>
+        <span class="num" style="color:${C.negative}">− ${fmt(BAL().ccUsed+BAL().ccInstallment)} ₫</span></div>
       <div class="rowline"><span>Standard Chartered</span>
         <span class="num" style="color:${C.negative}">− ${fmt(L.balance)} ₫</span></div>
       <div class="rowline" style="border-bottom:1px solid ${C.line}"><span><b style="font-weight:500">Tài sản ròng</b></span>
-        <span class="num" style="color:${C.text}">${fmt(SEED.balances.tcb - SEED.balances.ccUsed - SEED.balances.ccInstallment - L.balance)} ₫</span></div>`;
+        <span class="num" style="color:${C.text}">${fmt(BAL().tcb - BAL().ccUsed - BAL().ccInstallment - L.balance)} ₫</span></div>`;
   },
 };
 
@@ -827,6 +855,17 @@ function importScreen(){
       <p class="hint" style="text-align:left;margin-top:${S.md}px">
         Đang có ${state.tx.filter(t=>t.id.startsWith('i')).length} giao dịch từ ảnh chụp.
         <button data-imp="wipe" style="color:${C.negative};border-bottom:1px solid ${C.line}">Xoá hết để nhập lại</button></p>` : ''}
+    ${r.bal && (r.bal.tcb||r.bal.ccUsed) ? `
+      <div class="card" style="border-left:2px solid ${C.positive}">
+        <h4>Tìm thấy số dư trong ảnh</h4>
+        ${r.bal.tcb?`<div class="rowline"><span>Tài khoản TCB</span>
+          <span class="num">${fmt(r.bal.tcb)} ₫</span></div>`:''}
+        ${r.bal.ccUsed?`<div class="rowline"><span>Thẻ · đã chi tiêu</span>
+          <span class="num">${fmt(r.bal.ccUsed)} ₫</span></div>`:''}
+        ${r.bal.ccInstallment?`<div class="rowline"><span>Thẻ · trả góp</span>
+          <span class="num">${fmt(r.bal.ccInstallment)} ₫</span></div>`:''}
+        <p><button data-imp="setbal" style="color:${C.accent};border-bottom:1px solid ${C.line}">Cập nhật số dư</button></p>
+      </div>` : ''}
     ${r.rows ? `
       <h3 class="sec">Xem trước · ${r.dup} trùng sẽ bỏ qua</h3>
       ${r.rows.map(t=>`<div class="rowline"><span>
@@ -838,13 +877,15 @@ function importScreen(){
 }
 
 function render(){
+  const prev = document.querySelector('main');
+  const keepScroll = prev ? prev.scrollTop : 0;
   const s = summary();
   const body =
     state.tab==='overview' ? LAYOUT.overview.map(b=>blocks[b](s)).join('') :
     state.tab==='review'   ? reviewScreen() :
     state.tab==='import'   ? importScreen() :
     state.tab==='debt'     ? `<p class="eyebrow">Nợ &amp; trả góp</p>
-        <div class="hero num" style="font-size:26px">${fmt(SEED.balances.ccUsed+SEED.balances.ccInstallment+loanState().balance)}<i>₫</i></div>
+        <div class="hero num" style="font-size:26px">${fmt(BAL().ccUsed+BAL().ccInstallment+loanState().balance)}<i>₫</i></div>
         ${LAYOUT.debt.map(b=>blocks[b](s)).join('')}` :
     `<p class="eyebrow">Nhập theo tháng</p><div class="hero num" style="font-size:26px">Tháng 9</div>
      ${LAYOUT.month.map(b=>blocks[b](s)).join('')}`;
@@ -862,6 +903,9 @@ function render(){
       <div><nav>${LAYOUT.tabs.map(t=>`<button data-tab="${t.id}" class="${state.tab===t.id?'on':''}">
         <i>${t.icon}</i>${t.label}</button>`).join('')}</nav><div class="homebar"></div></div>
     </div>`;
+  const m = document.querySelector('main');
+  if (m && !state.resetScroll) m.scrollTop = keepScroll;
+  state.resetScroll = false;
   bind();
 }
 
@@ -907,6 +951,11 @@ function bind(){
     const box=document.getElementById('imp');
     const act=b.dataset.imp;
     if(act==='clear'){ state.imp=null; render(); return; }
+    if(act==='setbal'){
+      state.bal={ ...(state.bal||{}), ...(state.imp.bal||{}) };
+      delete state.bal.ccAvail;
+      save(); render(); return;
+    }
     if(act==='dedupe'){
       const bad=new Set(dupExtras().map(t=>t.id));
       state.tx=state.tx.filter(t=>!bad.has(t.id));
@@ -931,7 +980,7 @@ function bind(){
         if((have[k]||0) > 0){ have[k]--; t.new=false; dup++; }
         else { t.new=true; }
       });
-      state.imp={ raw, rows, dup }; render(); return;
+      state.imp={ raw, rows, dup, bal:parseBalance(raw) }; render(); return;
     }
     if(act==='commit'){
       const add=(state.imp.rows||[]).filter(t=>t.new);
