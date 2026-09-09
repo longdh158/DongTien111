@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b23';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b24';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -934,13 +934,15 @@ function render(){
 
   document.getElementById('app').innerHTML = `<style>${css()}</style>
     <div class="phone">
-      <header><div class="brand">Dòng <span>Tiền</span>
-          <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD} ${innerWidth}×${innerHeight} dpr${devicePixelRatio} ${matchMedia('(display-mode: standalone)').matches?'PWA':'safari'}</span></div>
-Tháng 9, 2026<br>
-          <span id="sync" style="font-size:10px;color:${C.faint}">…</span>
-          ${_uid?'':`<br><button onclick="dtLogin()" style="font-size:10px;color:${C.accent};
-            border-bottom:1px solid ${C.line}">Đăng nhập Google</button>`}
-        </div></header>
+      <header>
+        <div class="brand">Dòng <span>Tiền</span>
+          <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD}</span></div>
+        <div class="hd-right">
+          <button data-month="1" style="color:${C.muted}">Tháng ${Number(state.month.slice(5))}, ${state.month.slice(0,4)} ⌄</button>
+          <br><span id="sync" style="font-size:10px;color:${C.faint}">…</span>
+          ${_uid?'':`<br><button onclick="dtLogin()" style="font-size:10px;color:${C.accent};border-bottom:1px solid ${C.line}">Đăng nhập Google</button>`}
+        </div>
+      </header>
       <main>${body}</main>
       <div><nav>${LAYOUT.tabs.map(t=>`<button data-tab="${t.id}" class="${state.tab===t.id?'on':''}">
         <i>${t.icon}</i>${t.label}</button>`).join('')}</nav><div class="homebar"></div></div>
