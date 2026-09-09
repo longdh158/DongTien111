@@ -75,6 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
+const BUILD = 'b8';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
 const PINNED = { 'TRAN HUNG ANH':'Ăn uống' };
@@ -748,7 +749,8 @@ function render(){
 
   document.getElementById('app').innerHTML = `<style>${css()}</style>
     <div class="phone">
-      <header><div class="brand">Dòng <span>Tiền</span></div>
+      <header><div class="brand">Dòng <span>Tiền</span>
+          <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD}</span></div>
         <div class="hd-right">Tháng 9, 2026<br>
           <span id="sync" style="font-size:10px;color:${C.faint}">…</span>
           ${_uid?'':`<br><button onclick="dtLogin()" style="font-size:10px;color:${C.accent};
