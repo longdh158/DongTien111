@@ -75,7 +75,7 @@ const LAYOUT = {
   month:    ['balances','incomes','accounts'],
 };
 
-const BUILD = 'b19';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b20';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -315,9 +315,13 @@ function dupExtras(){
   const extras=[];
   Object.values(groups).forEach(g=>{
     if(g.length<2) return;
-    const seed=g.find(t=>!t.id.startsWith('i'));
-    const keep=seed||g[0];
-    g.forEach(t=>{ if(t!==keep && t.id.startsWith('i')) extras.push(t); });
+    /* CHỈ dọn khi có một bản có sẵn trong app và một bản nhập từ ảnh.
+       Hai dòng cùng nhập từ ảnh thì để yên — ngân hàng có thể ghi
+       hai giao dịch thật cùng ngày cùng số tiền, không phân biệt được. */
+    const seeds = g.filter(t=>!t.id.startsWith('i'));
+    if(!seeds.length) return;
+    const imported = g.filter(t=>t.id.startsWith('i'));
+    imported.slice(0, seeds.length).forEach(t=>extras.push(t));
   });
   return extras;
 }
