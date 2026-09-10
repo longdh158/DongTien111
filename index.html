@@ -77,7 +77,16 @@ const LAYOUT = {
   month:    ['incomes'],
 };
 
-const BUILD = 'b33';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b35';   // số hiệu bản, đổi mỗi lần sửa
+/* Danh sách tháng tự sinh: tháng hiện tại + mọi tháng có giao dịch.
+   Không cắm cứng, nên sang năm 2027 hay nhập lùi về tháng cũ đều tự hiện. */
+const thisMonth = () => new Date().toISOString().slice(0,7);
+function monthList(){
+  const set = new Set([thisMonth()]);
+  (state && state.tx || []).forEach(t=>{ if(t.date) set.add(String(t.date).slice(0,7)); });
+  return [...set].sort().reverse();
+}
+
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -191,11 +200,9 @@ function load(){
     src:t[4], kind:t[5],
   }));
   const wantTab = /nhap/i.test(location.hash) ? 'import' : 'overview';
-  const MONTHS = ['2026-08','2026-09','2026-10'];
   return {
     tab: wantTab,
-    month: saved.month || '2026-09',
-    MONTHS,
+    month: thisMonth(),
     tx: tx.concat(saved.tx || []),
     group:  saved.group  || {},   // id → nhóm đại ca chọn
     flag:   saved.flag   || {},   // id → bất thường
@@ -212,13 +219,14 @@ function load(){
     lastBatch: saved.lastBatch || null,
     confirmWipe: false,
     noteOpen: null,
+    monthPick: false,
     closing: saved.closing ?? null,
   };
 }
 let _db=null, _uid=null, _timer=null, _remote=false;
 
 function snapshot(){
-  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, month:state.month, drift:state.drift, impAck:state.impAck, lastBatch:state.lastBatch,
+  return { group:state.group, flag:state.flag, done:state.done, closing:state.closing, keepPairs:state.keepPairs, bal:state.bal, pairSeen:state.pairSeen, drift:state.drift, impAck:state.impAck, lastBatch:state.lastBatch,
            tx:state.tx.filter(t=>t.id.startsWith('i')),   // giao dịch tự nhập
            at:Date.now() };
 }
@@ -833,7 +841,7 @@ const blocks = {
       ${noteBody('inst',`4 gói chuyển đổi 26/08, mỗi gói 3 kỳ, còn 2 kỳ. Mỗi kỳ trừ ${fmt(3343139)} ₫, hết vào tháng 11/2026.`)}</div>`;
   },
 
-  loan(){ const L = loanState();
+  loan(){ const L = loanState(new Date(state.month+'-28'));
     return `<div class="card pos"><h4>Khoản vay Standard Chartered ${noteIcon('loan')}</h4>
       <div class="v num">${fmt(L.balance)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
       <p>Kỳ ${L.paid}/${LOAN.months} · còn ${L.left} kỳ · hết nợ ${L.endDate.getMonth()+1}/${L.endDate.getFullYear()}.</p>
@@ -998,6 +1006,9 @@ function render(){
           <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD}</span></div>
         <div class="hd-right">
           <button data-month="1" style="color:${C.muted}">Tháng ${Number(state.month.slice(5))}, ${state.month.slice(0,4)} ⌄</button>
+          ${state.monthPick ? `<div class="monthpick">${monthList().map(m=>
+            `<button data-setmonth="${m}" class="${m===state.month?'cur':''}">Tháng ${Number(m.slice(5))}${
+              m.slice(0,4)!==thisMonth().slice(0,4)?', '+m.slice(0,4):''}</button>`).join('')}</div>` : ''}
           <br><span id="sync" style="font-size:10px;color:${C.faint}">…</span>
           ${_uid?'':`<br><button onclick="dtLogin()" style="font-size:10px;color:${C.accent};border-bottom:1px solid ${C.line}">Đăng nhập Google</button>`}
         </div>
@@ -1015,9 +1026,12 @@ function render(){
 function bind(){
   const $ = q => [...document.querySelectorAll(q)];
   $('[data-tab]').forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; render(); });
-  $('[data-month]').forEach(b=>b.onclick=()=>{
-    const i=MONTHS.indexOf(state.month);
-    state.month=MONTHS[(i+1)%MONTHS.length]; save(); render(); });
+  $('[data-month]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    state.monthPick = !state.monthPick; render(); });
+  $('[data-setmonth]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    state.month=b.dataset.setmonth; state.monthPick=false; save(); render(); });
   $('[data-note]').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
     state.noteOpen = state.noteOpen===b.dataset.note ? null : b.dataset.note;
