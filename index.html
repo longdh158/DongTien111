@@ -77,7 +77,7 @@ const LAYOUT = {
   month:    ['incomes'],
 };
 
-const BUILD = 'b35';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b36';   // số hiệu bản, đổi mỗi lần sửa
 /* Danh sách tháng tự sinh: tháng hiện tại + mọi tháng có giao dịch.
    Không cắm cứng, nên sang năm 2027 hay nhập lùi về tháng cũ đều tự hiện. */
 const thisMonth = () => new Date().toISOString().slice(0,7);
@@ -417,16 +417,17 @@ function css(){ return `
   max-width:100%;overflow-wrap:anywhere}
 html,body{background:${C.ink};height:100%;overflow:hidden;overscroll-behavior:none}
 body{font-family:${THEME.font.family};color:${C.text};font-weight:300;line-height:1.5;
-  position:fixed;inset:0;display:flex;justify-content:center}
+  position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;max-width:100vw;
+  display:flex;justify-content:center}
 .num{font-variant-numeric:tabular-nums;letter-spacing:-.01em;overflow-wrap:normal}
-.phone{width:100%;background:${C.ink};
+.phone{width:100vw;max-width:100vw;background:${C.ink};
   height:100%;overflow:hidden;
   padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
   display:grid;grid-template-rows:auto minmax(0,1fr) auto}
 /* Trên màn hình rộng thì bo khung cho giống điện thoại */
 @media (min-width:520px) and (min-height:700px){
   body{padding:${S.md}px 0}
-  .phone{max-width:${THEME.maxWidth}px;height:calc(100% - ${S.md*2}px);border:1px solid ${C.line};
+  .phone{width:100%;max-width:${THEME.maxWidth}px;height:calc(100% - ${S.md*2}px);border:1px solid ${C.line};
     border-radius:${R.phone}px;box-shadow:0 30px 70px rgba(0,0,0,.45)}
 }
 header{flex:none;min-width:0;padding:calc(${S.sm}px + env(safe-area-inset-top)) ${S.lg}px ${S.sm+2}px;
@@ -1003,7 +1004,7 @@ function render(){
     <div class="phone">
       <header>
         <div class="brand">Dòng <span>Tiền</span>
-          <span style="font-size:9px;color:${C.faint};font-weight:300">${BUILD}</span></div>
+          <span id="diag" style="font-size:9px;color:${C.faint};font-weight:300">${BUILD}</span></div>
         <div class="hd-right">
           <button data-month="1" style="color:${C.muted}">Tháng ${Number(state.month.slice(5))}, ${state.month.slice(0,4)} ⌄</button>
           ${state.monthPick ? `<div class="monthpick">${monthList().map(m=>
@@ -1017,6 +1018,10 @@ function render(){
       <div><nav>${LAYOUT.tabs.map(t=>`<button data-tab="${t.id}" class="${state.tab===t.id?'on':''}">
         <i>${t.icon}</i>${t.label}</button>`).join('')}</nav><div class="homebar"></div></div>
     </div>`;
+  const dg = document.getElementById('diag');
+  if (dg) { const ph = document.querySelector('.phone');
+    dg.textContent = `${BUILD} win${innerWidth} phone${ph?Math.round(ph.getBoundingClientRect().width):'?'} doc${
+      document.documentElement.scrollWidth}`; }
   const m = document.querySelector('main');
   if (m && !state.resetScroll) m.scrollTop = keepScroll;
   state.resetScroll = false;
