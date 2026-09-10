@@ -72,12 +72,12 @@ const LAYOUT = {
      Thêm tên vào mảng là hiện, bỏ ra là ẩn, đổi thứ tự là đổi vị trí. */
   /* Khối có sẵn: 'balance' 'hero' 'groupsLite' 'groups' 'drift'
      'offset' 'debtLine' 'recon' 'debtPaid' 'pending' */
-  overview: ['hero','groupsLite','drift','offset','debtLine','pending'],
+  overview: ['hero','groupsLite','income','drift','offset','debtLine','pending'],
   debt:     ['card','installment','loan'],
   month:    ['incomes'],
 };
 
-const BUILD = 'b29';   // số hiệu bản, đổi mỗi lần sửa
+const BUILD = 'b33';   // số hiệu bản, đổi mỗi lần sửa
 const GROUPS = ['Ăn uống','Đi lại','Mua sắm','Cá nhân','Khác'];
 const OFFSET_DAYS = 5;   // cặp cùng tên, cùng số tiền, ngược dấu trong bao nhiêu ngày
 const TOP_N = 99;  // số nhóm hiện ở overview. Đặt nhỏ lại thì phần dư gộp thành 'Còn lại'
@@ -211,6 +211,7 @@ function load(){
     impAck: saved.impAck || 0,
     lastBatch: saved.lastBatch || null,
     confirmWipe: false,
+    noteOpen: null,
     closing: saved.closing ?? null,
   };
 }
@@ -528,6 +529,12 @@ nav button i{display:block;font-style:normal;font-size:15px;margin-bottom:2px;op
 
 /* now = true → chọn là ăn ngay (tab Duyệt, vì cuối cùng còn bấm Duyệt).
    now = false → chọn xong phải bấm Lưu (overview, tránh danh sách nhảy). */
+/* Ghi chú ẩn — chỉ hiện khi chạm vào ⓘ */
+const noteIcon = id =>
+  `<button data-note="${id}" class="noteicon${state.noteOpen===id?' on':''}">ⓘ</button>`;
+const noteBody = (id, text) =>
+  state.noteOpen===id ? `<p class="notebody">${text}</p>` : '';
+
 function pickerHTML(t, now){
   const sel = now ? groupOf(t) : (state.pending[t.id] || groupOf(t));
   const changed = !now && state.pending[t.id] && state.pending[t.id] !== groupOf(t);
@@ -713,6 +720,26 @@ const blocks = {
       `</div><p class="hint" style="margin-top:2px">Chạm tên nhóm để mở · chạm giao dịch để đổi nhóm</p>`;
   },
 
+  income(){
+    const off = offsetIds();
+    const list = state.tx.filter(t=>t.kind==='income' && inMonth(t) && !off.has(t.id))
+                         .sort((a,b)=>b.amount-a.amount);
+    if(!list.length) return '';
+    const sum = list.reduce((a,b)=>a+b.amount,0);
+    const open = state.open['__income'];
+    return `<div class="card" style="border-left:2px solid ${C.positive};margin-top:${S.lg}px">
+      <div data-toggle="__income" style="cursor:pointer">
+        <h4>Tiền vào tháng này ${noteIcon('income')}</h4>
+        <div class="v num" style="color:${C.positive}">${fmt(sum)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
+      </div>
+      ${open ? list.map(t=>`<div class="rowline"><span>${t.name}${
+        t.note?` · <span style="color:${C.faint}">${t.note}</span>`:''}</span>
+        <span class="num">${fmt(t.amount)} ₫</span></div>`).join('')
+       : `<div class="s">${list.length} khoản · chạm để xem</div>`}
+      ${noteBody('income','Không trừ vào chi tiêu. Khoản nào là bạn trả lại đúng số tiền đã ứng thì app tự ghép cặp và bỏ qua cả hai chiều.')}
+    </div>`;
+  },
+
   drift(){
     const d = state.drift;
     if(!d) return '';
@@ -735,11 +762,10 @@ const blocks = {
     const pairs = offsetPairs().filter(([a,b])=>!seen[a.id+'|'+b.id]);
     if(!pairs.length) return '';
     return `<div class="card" style="border-left:2px solid ${C.positive}">
-      <h4>Ứng rồi được trả lại — đã trừ khỏi chi tiêu</h4>
+      <h4>Ứng rồi được trả lại — đã trừ khỏi chi tiêu ${noteIcon('offset')}</h4>
       ${pairs.map(([a,b])=>`<div class="rowline"><span>${a.name}</span>
         <span class="num">${fmt(a.amount)} ₫</span></div>`).join('')}
-      <p>Cùng tên, cùng số tiền, ngược chiều trong ${OFFSET_DAYS} ngày.
-      ${state.keepPairs?'Đang tính vào chi tiêu.':'Đang bỏ qua cả hai chiều.'}</p>
+      ${noteBody('offset',`Cùng tên, cùng số tiền, ngược chiều trong ${OFFSET_DAYS} ngày. ${state.keepPairs?'Đang tính vào chi tiêu.':'Đang bỏ qua cả hai chiều.'}`)}
       <div style="display:flex;gap:9px;margin-top:${S.sm}px">
         <button class="btn ghost" style="flex:1" data-keeppairs="1">${
           state.keepPairs?'Bỏ qua chúng':'Tính vào chi tiêu'}</button>
@@ -780,10 +806,10 @@ const blocks = {
     </div>`;
   },
 
-  debtPaid(s){ return `<div class="card"><h4>Trả nợ &amp; chuyển khoản — không tính chi tiêu</h4>
+  debtPaid(s){ return `<div class="card"><h4>Trả nợ &amp; chuyển khoản — không tính chi tiêu ${noteIcon('debt')}</h4>
     ${s.debts.map(t=>`<div class="rowline"><span>${t.name}</span>
       <span class="num">${fmt(t.amount)} ₫</span></div>`).join('')}
-    <p>Tiền rời tài khoản nhưng không phải chi tiêu mới.</p></div>`;
+    ${noteBody('debt','Tiền rời tài khoản nhưng không phải chi tiêu mới — phần lớn là trả những khoản đã tiêu trước đó.')}</div>`;
   },
 
   pending(){
@@ -796,28 +822,26 @@ const blocks = {
   },
 
   card(){ const used = BAL().ccUsed, inst = BAL().ccInstallment;
-    return `<div class="card accent"><h4>Dư nợ thẻ đang phát sinh</h4>
+    return `<div class="card accent"><h4>Dư nợ thẻ đang phát sinh ${noteIcon('card')}</h4>
       <div class="v num">${fmt(used)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
-      <p>Hạn mức ${fmt(CARD.limit)} ₫ · đã dùng ${Math.round((used+inst)/CARD.limit*100)}%.
-      Sao kê chốt ngày ${CARD.statementDay}, hạn trả ngày ${CARD.dueDay}.</p></div>`;
+      ${noteBody('card',`Hạn mức ${fmt(CARD.limit)} ₫ · đã dùng ${Math.round((used+inst)/CARD.limit*100)}%. Sao kê chốt ngày ${CARD.statementDay}, hạn trả ngày ${CARD.dueDay}.`)}</div>`;
   },
 
   installment(){ const inst = BAL().ccInstallment;
-    return `<div class="card neg"><h4>Trả góp trên thẻ</h4>
+    return `<div class="card neg"><h4>Trả góp trên thẻ ${noteIcon('inst')}</h4>
       <div class="v num">${fmt(inst)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
-      <p>4 gói chuyển đổi 26/08, mỗi gói 3 kỳ, còn 2 kỳ.
-      Mỗi kỳ trừ ${fmt(3343139)} ₫, hết vào tháng 11/2026.</p></div>`;
+      ${noteBody('inst',`4 gói chuyển đổi 26/08, mỗi gói 3 kỳ, còn 2 kỳ. Mỗi kỳ trừ ${fmt(3343139)} ₫, hết vào tháng 11/2026.`)}</div>`;
   },
 
   loan(){ const L = loanState();
-    return `<div class="card pos"><h4>Khoản vay Standard Chartered</h4>
+    return `<div class="card pos"><h4>Khoản vay Standard Chartered ${noteIcon('loan')}</h4>
       <div class="v num">${fmt(L.balance)} <span style="font-size:12px;color:${C.muted}">₫</span></div>
       <p>Kỳ ${L.paid}/${LOAN.months} · còn ${L.left} kỳ · hết nợ ${L.endDate.getMonth()+1}/${L.endDate.getFullYear()}.</p>
       <div class="rowline" style="margin-top:${S.sm}px"><span>Kỳ này là chi phí (lãi)</span>
         <span class="num">${fmt(L.interest)} ₫</span></div>
       <div class="rowline"><span>Kỳ này là giảm nợ (gốc)</span>
         <span class="num" style="color:${C.positive}">${fmt(L.principalPart)} ₫</span></div>
-      <p>Chuyển đều ${fmt(LOAN.transferAmount)} ₫ ngày 5 hàng tháng.</p></div>`;
+      ${noteBody('loan',`Chuyển đều ${fmt(LOAN.transferAmount)} ₫ ngày 5 hàng tháng. Chỉ phần lãi tính vào chi tiêu, phần gốc chuyển sang giảm nợ.`)}</div>`;
   },
 
   balances(){ const m = SEED.months['2026-09'];
@@ -828,19 +852,19 @@ const blocks = {
   },
 
   incomes(){
-    const m8 = SEED.months['2026-08'];
-    const inc8 = m8.incomes.reduce((a,b)=>a+b.v,0);
-    const used8 = m8.opening + inc8 - m8.closing;
-    return `<h3 class="sec">Tháng 9 — lương về cuối tháng</h3>
-      <div class="field"><label>Lương tháng 9</label><span class="val empty">chưa về</span></div>
-      <h3 class="sec">Tháng 8 — đã chốt</h3>` +
-      m8.incomes.map(i=>`<div class="field"><label>${i.n} · ${i.d.slice(8)}/${i.d.slice(5,7)}</label>
-        <span class="val num">${fmt(i.v)} ₫</span></div>`).join('') +
-      `<div class="field"><label>Tiền đã rời tài khoản</label>
-        <span class="val num">${fmt(used8)} ₫</span></div>
-      <p style="font-size:12px;color:${C.muted};margin-top:${S.sm}px;line-height:1.55">
-        Gồm cả 15.685.000 ₫ trả nợ thẻ và các khoản chuyển đi, nên không phải toàn bộ là chi tiêu.
-        Cần bóc giao dịch tháng 8 mới tách được theo nhóm.</p>`;
+    const off = offsetIds();
+    const list = state.tx.filter(t=>t.kind==='income' && inMonth(t) && !off.has(t.id))
+                         .sort((a,b)=>b.amount-a.amount);
+    const sum = list.reduce((a,b)=>a+b.amount,0);
+    return `<h3 class="sec">Tiền vào tháng ${Number(state.month.slice(5))} ${noteIcon('salary')}</h3>
+      ${list.length ? list.map(t=>`<div class="field">
+          <label>${t.name}${t.note?' · '+t.note:''}</label>
+          <span class="val num" style="color:${C.positive}">${fmt(t.amount)} ₫</span></div>`).join('')
+        : `<div class="field"><label>Chưa có khoản nào</label>
+           <span class="val empty">–</span></div>`}
+      ${list.length?`<div class="field"><label><b style="font-weight:500">Tổng</b></label>
+        <span class="val num">${fmt(sum)} ₫</span></div>`:''}
+      ${noteBody('salary','Lương về ngày đi làm cuối tháng nên luôn nằm đúng tháng của nó.')}`;
   },
 
   accounts(){ const L = loanState();
@@ -892,8 +916,8 @@ function importScreen(){
   const r = state.imp || {};
   return `<p class="eyebrow">Nhập dữ liệu</p>
     <div class="hero num" style="font-size:26px">${r.rows?`${r.rows.length} giao dịch`:'Dán chữ từ ảnh'}</div>
-    <p class="hint" style="text-align:left;margin-top:${S.sm}px;line-height:1.6">
-      Mở ảnh chụp trong Ảnh → chạm giữ chọn chữ → Sao chép → dán vào ô dưới.</p>
+    <p class="hint" style="text-align:left;margin-top:${S.sm}px">
+      ${noteBody('howto','Mở ảnh chụp trong Ảnh → chạm giữ chọn chữ → Sao chép → dán vào ô dưới. Hoặc chọn nhiều ảnh rồi chia sẻ vào Shortcut Dòng Tiền.')}</p>
     <h3 class="sec">Ảnh này chụp từ đâu</h3>
     <div class="picker" style="border:none;padding-left:0">
       ${[['auto','Tự nhận'],['tcb','Tài khoản'],['cc','Thẻ tín dụng']].map(([v,l])=>
@@ -921,9 +945,8 @@ function importScreen(){
         if(state.impAck>=n) return '';
         const last=state.tx.filter(t=>t.batch===state.lastBatch).length;
         return `<div class="card" style="margin-top:${S.lg}px">
-          <h4>Đã nhập ${n} giao dịch từ ảnh</h4>
-          <p>Kiểm ở tab Duyệt xem đúng chưa. Sai thì hoàn tác lần nhập vừa rồi,
-          hoặc xoá từng dòng bằng nút ✕.</p>
+          <h4>Đã nhập ${n} giao dịch từ ảnh ${noteIcon('imp')}</h4>
+          ${noteBody('imp','Kiểm ở tab Duyệt xem đúng chưa. Sai thì hoàn tác lần nhập vừa rồi, hoặc xoá từng dòng bằng nút ✕.')}
           <div style="display:flex;gap:9px;margin-top:${S.sm}px">
             ${last?`<button class="btn ghost" style="flex:1" data-imp="undo">Hoàn tác ${last} dòng vừa nhập</button>`:''}
             <button class="btn" style="flex:1" data-imp="ack">Đúng rồi</button>
@@ -935,8 +958,8 @@ function importScreen(){
         </div>`; })()}` : ''}
     ${r.bal && r.bal.tcb ? `
       <div class="card" style="border-left:2px solid ${C.positive}">
-        <h4>Tìm thấy số dư trong ảnh</h4>
-        <p>App không hiện số dư, chỉ dùng nó để kiểm xem có giao dịch nào chụp sót không.</p>
+        <h4>Tìm thấy số dư trong ảnh ${noteIcon('bal')}</h4>
+        ${noteBody('bal','App không hiện số dư, chỉ dùng nó để kiểm xem có giao dịch nào chụp sót không.')}
         <button class="btn" style="width:100%;margin-top:${S.sm}px" data-imp="setbal">Dùng để đối chiếu</button>
       </div>` : ''}
     ${r.rows ? `
@@ -995,6 +1018,10 @@ function bind(){
   $('[data-month]').forEach(b=>b.onclick=()=>{
     const i=MONTHS.indexOf(state.month);
     state.month=MONTHS[(i+1)%MONTHS.length]; save(); render(); });
+  $('[data-note]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    state.noteOpen = state.noteOpen===b.dataset.note ? null : b.dataset.note;
+    render(); });
   $('[data-toggle]').forEach(b=>b.onclick=()=>{
     const g=b.dataset.toggle; state.open[g]=!state.open[g]; render(); });
   $('[data-chip]').forEach(c=>c.onclick=e=>{
